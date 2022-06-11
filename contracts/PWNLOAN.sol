@@ -519,21 +519,50 @@ contract PWNLOAN is ERC1155, Ownable {
             
             // there is a case, where there is already a stream, but it's from a different loan...
             // safer to use "decrease and increase" functions, to take care of the merging... 
-            if(flowRate > 0) {
-                cfaV1.deleteFlowByOperator(LOANs[ids[0]].borrower, from, ISuperToken(LOANs[ids[0]].asset.assetAddress));
-            }
+            _reduceFlow(LOANs[ids[0]].borrower, from, ISuperToken(LOANs[ids[0]].asset.assetAddress), LOANs[ids[0]].interestByTheSecond);
             if(to!=address(0)){
                 if(LOANs[ids[0]].borrower != to) {
-                    cfaV1.createFlowByOperator(
-                        LOANs[ids[0]].borrower, 
-                        to, 
-                        ISuperToken(LOANs[ids[0]].asset.assetAddress), 
-                        LOANs[ids[0]].interestByTheSecond
-                    );    
+                    _increaseFlow(LOANs[ids[0]].borrower, from, ISuperToken(LOANs[ids[0]].asset.assetAddress), LOANs[ids[0]].interestByTheSecond);
                 }
                 LOANs[ids[0]].duration = uint32(type(uint40).max) - uint32(block.timestamp);
             }
         }
     }
+        function _reduceFlow(address _from, address _to, ISuperToken _token, int96 _flowRate) internal {
+        if (_to == _from) return;
+
+        (, int96 outFlowRate, , ) = cfaV1.cfa.getFlow(
+            _token,
+            _from,
+            _to
+        );
+
+        if (outFlowRate == _flowRate) {
+            cfaV1.deleteFlowByOperator(_from, _to, _token);
+        } else if (outFlowRate > _flowRate) {
+            // reduce the outflow by flowRate;
+            // shouldn't overflow, because we just checked that it was bigger.
+            cfaV1.updateFlowByOperator(_from, _to, _token, outFlowRate - _flowRate);
+        }
+        // won't do anything if outFlowRate < flowRate
+    }
+
+    //this will increase the flow or create it
+    function _increaseFlow(address _from, address _to, ISuperToken _token, int96 _flowRate) internal {
+        if (_to == _from) return;
+
+        (, int96 outFlowRate, , ) = cfaV1.cfa.getFlow(
+            _token,
+            _from,
+            _to
+        ); //returns 0 if stream doesn't exist
+        if (outFlowRate == 0) {
+            cfaV1.createFlowByOperator(_from, _to, _token, _flowRate);
+        } else {
+            // increase the outflow by flowRates[tokenId]
+            cfaV1.updateFlowByOperator(_from, _to, _token, outFlowRate + _flowRate);
+        }
+    }
+
 
 }
